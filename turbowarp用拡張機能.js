@@ -1,5 +1,5 @@
-// TurboWarp 3D Skybox Extension - シンプル版
-// このスプライトのコスチュームを3Dスカイボックスとして表示
+// TurboWarp 3D Skybox Extension - Scratch Stage統合版
+// ステージ内に3Dスカイボックスを表示
 
 (function(Scratch) {
   'use strict';
@@ -18,17 +18,19 @@
   }
 
   class SkyboxEngine {
-    constructor() {
+    constructor(runtime) {
+      this.runtime = runtime;
       this.scene = null;
       this.camera = null;
       this.renderer = null;
       this.skyboxMesh = null;
-      this.container = null;
+      this.canvas = null;
       this.isInitialized = false;
       this.rotationX = 0;
       this.rotationY = 0;
       this.rotationZ = 0;
       this.zoom = 1;
+      this.currentTexture = null;
     }
 
     async init() {
@@ -36,18 +38,32 @@
 
       await loadThreeJS();
 
-      // コンテナを作成
-      this.container = document.createElement('div');
-      this.container.id = 'skybox-container';
-      this.container.style.position = 'fixed';
-      this.container.style.top = '0';
-      this.container.style.left = '0';
-      this.container.style.width = '100%';
-      this.container.style.height = '100%';
-      this.container.style.zIndex = '1';
-      this.container.style.display = 'none';
-      this.container.style.pointerEvents = 'none';
-      document.body.appendChild(this.container);
+      // Scratchの既存canvasを取得
+      const stageCanvas = document.querySelector('[class*="stage"]');
+      if (!stageCanvas) {
+        console.error('Stage canvas not found');
+        return;
+      }
+
+      // Three.jsのcanvasを作成
+      this.canvas = document.createElement('canvas');
+      this.canvas.id = 'skybox-canvas';
+      this.canvas.style.position = 'absolute';
+      this.canvas.style.top = '0';
+      this.canvas.style.left = '0';
+      this.canvas.style.width = '100%';
+      this.canvas.style.height = '100%';
+      this.canvas.style.pointerEvents = 'none';
+      this.canvas.style.zIndex = '0';
+
+      // ステージコンテナを探して追加
+      const stageContainer = document.querySelector('[class*="monitor-list"]')?.parentElement || 
+                             document.querySelector('[class*="stage"]')?.parentElement;
+      
+      if (stageContainer) {
+        stageContainer.style.position = 'relative';
+        stageContainer.insertBefore(this.canvas, stageContainer.firstChild);
+      }
 
       // シーンを作成
       this.scene = new THREE.Scene();
@@ -55,30 +71,43 @@
       // カメラを作成
       this.camera = new THREE.PerspectiveCamera(
         75,
-        window.innerWidth / window.innerHeight,
+        this.canvas.clientWidth / this.canvas.clientHeight || 480 / 360,
         0.1,
         10000
       );
       this.camera.position.z = 0;
 
       // レンダラーを作成
-      this.renderer = new THREE.WebGLRenderer({ 
-        antialias: true, 
+      this.renderer = new THREE.WebGLRenderer({
+        canvas: this.canvas,
+        antialias: true,
         alpha: true,
-        preserveDrawingBuffer: true 
+        preserveDrawingBuffer: true
       });
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-      this.renderer.setPixelRatio(window.devicePixelRatio);
+
+      // ステージサイズに合わせる
+      this.updateRendererSize();
+
       this.renderer.setClearColor(0x000000, 1);
-      this.container.appendChild(this.renderer.domElement);
 
       // ウィンドウリサイズ対応
-      window.addEventListener('resize', () => this.onWindowResize());
+      window.addEventListener('resize', () => this.updateRendererSize());
 
-      // ���ニメーションループ開始
+      // アニメーションループ開始
       this.animate();
 
       this.isInitialized = true;
+    }
+
+    updateRendererSize() {
+      if (!this.canvas || !this.renderer || !this.camera) return;
+
+      const width = this.canvas.clientWidth || 480;
+      const height = this.canvas.clientHeight || 360;
+
+      this.renderer.setSize(width, height);
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
     }
 
     setSkyTexture(imageDataUrl) {
@@ -96,6 +125,7 @@
       textureLoader.load(imageDataUrl, (texture) => {
         texture.magFilter = THREE.LinearFilter;
         texture.minFilter = THREE.LinearFilter;
+        this.currentTexture = texture;
 
         // マテリアルを作成
         const material = new THREE.MeshBasicMaterial({
@@ -110,21 +140,39 @@
     }
 
     show() {
-      if (this.container) {
-        this.container.style.display = 'block';
+      if (this.canvas) {
+        this.canvas.style.display = 'block';
       }
     }
 
     hide() {
-      if (this.container) {
-        this.container.style.display = 'none';
+      if (this.canvas) {
+        this.canvas.style.display = 'none';
       }
     }
 
-    setRotation(x, y, z) {
-      this.rotationX = (x * Math.PI) / 180;
-      this.rotationY = (y * Math.PI) / 180;
-      this.rotationZ = (z * Math.PI) / 180;
+    setRotationX(value) {
+      this.rotationX = (value * Math.PI) / 180;
+    }
+
+    setRotationY(value) {
+      this.rotationY = (value * Math.PI) / 180;
+    }
+
+    setRotationZ(value) {
+      this.rotationZ = (value * Math.PI) / 180;
+    }
+
+    rotateX(value) {
+      this.rotationX += (value * Math.PI) / 180;
+    }
+
+    rotateY(value) {
+      this.rotationY += (value * Math.PI) / 180;
+    }
+
+    rotateZ(value) {
+      this.rotationZ += (value * Math.PI) / 180;
     }
 
     setZoom(value) {
@@ -141,21 +189,16 @@
         this.skyboxMesh.scale.set(this.zoom, this.zoom, this.zoom);
       }
 
-      this.renderer.render(this.scene, this.camera);
-    }
-
-    onWindowResize = () => {
-      if (!this.camera || !this.renderer) return;
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
+      if (this.renderer && this.scene && this.camera) {
+        this.renderer.render(this.scene, this.camera);
+      }
     }
   }
 
   class TurboWarpSkyboxExtension {
     constructor(runtime) {
       this.runtime = runtime;
-      this.skybox = new SkyboxEngine();
+      this.skybox = new SkyboxEngine(runtime);
       this.skybox.init();
     }
 
@@ -186,21 +229,68 @@
             text: '3Dスカイボックスを非表示'
           },
           {
-            opcode: 'setRotation',
+            opcode: 'setRotationX',
             blockType: Scratch.BlockType.COMMAND,
-            text: 'スカイボックスを X [X] Y [Y] Z [Z] 度回転させる',
+            text: 'X軸回転を [VALUE] 度にする',
             arguments: {
-              X: {
+              VALUE: {
                 type: Scratch.ArgumentType.NUMBER,
                 defaultValue: 0
-              },
-              Y: {
+              }
+            }
+          },
+          {
+            opcode: 'setRotationY',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'Y軸回転を [VALUE] 度にする',
+            arguments: {
+              VALUE: {
                 type: Scratch.ArgumentType.NUMBER,
                 defaultValue: 0
-              },
-              Z: {
+              }
+            }
+          },
+          {
+            opcode: 'setRotationZ',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'Z軸回転を [VALUE] 度にする',
+            arguments: {
+              VALUE: {
                 type: Scratch.ArgumentType.NUMBER,
                 defaultValue: 0
+              }
+            }
+          },
+          {
+            opcode: 'rotateX',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'X軸を [VALUE] 度回転',
+            arguments: {
+              VALUE: {
+                type: Scratch.ArgumentType.NUMBER,
+                defaultValue: 10
+              }
+            }
+          },
+          {
+            opcode: 'rotateY',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'Y軸を [VALUE] 度回転',
+            arguments: {
+              VALUE: {
+                type: Scratch.ArgumentType.NUMBER,
+                defaultValue: 10
+              }
+            }
+          },
+          {
+            opcode: 'rotateZ',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'Z軸を [VALUE] 度回転',
+            arguments: {
+              VALUE: {
+                type: Scratch.ArgumentType.NUMBER,
+                defaultValue: 10
               }
             }
           },
@@ -249,11 +339,34 @@
       this.skybox.hide();
     }
 
-    setRotation(args) {
-      const x = parseFloat(args.X) || 0;
-      const y = parseFloat(args.Y) || 0;
-      const z = parseFloat(args.Z) || 0;
-      this.skybox.setRotation(x, y, z);
+    setRotationX(args) {
+      const value = parseFloat(args.VALUE) || 0;
+      this.skybox.setRotationX(value);
+    }
+
+    setRotationY(args) {
+      const value = parseFloat(args.VALUE) || 0;
+      this.skybox.setRotationY(value);
+    }
+
+    setRotationZ(args) {
+      const value = parseFloat(args.VALUE) || 0;
+      this.skybox.setRotationZ(value);
+    }
+
+    rotateX(args) {
+      const value = parseFloat(args.VALUE) || 0;
+      this.skybox.rotateX(value);
+    }
+
+    rotateY(args) {
+      const value = parseFloat(args.VALUE) || 0;
+      this.skybox.rotateY(value);
+    }
+
+    rotateZ(args) {
+      const value = parseFloat(args.VALUE) || 0;
+      this.skybox.rotateZ(value);
     }
 
     setZoom(args) {
