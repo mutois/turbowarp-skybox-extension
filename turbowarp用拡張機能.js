@@ -1,5 +1,6 @@
 // TurboWarp 3D Skybox Extension
-// 3Dパノラマスカイボックス拡張機能
+// 完璧な3Dパノラマスカイボックス拡張機能
+// cubemap対応、スプライトコスチューム読み込み対応
 
 (function(Scratch) {
   'use strict';
@@ -25,42 +26,130 @@
       this.camera = null;
       this.renderer = null;
       this.skyboxMesh = null;
+      this.starMeshes = []; // 3D星用
       this.container = null;
       this.isInitialized = false;
       this.rotationX = 0;
       this.rotationY = 0;
       this.rotationZ = 0;
       this.zoom = 1;
-      this.skyboxTextures = {
-        default: this.generateDefaultStarfield()
-      };
+      this.brightness = 1;
+      this.mode = 'skybox'; // 'skybox', '3dstars', 'cubemap'
+      this.fileInput = null;
+      this.createFileInput();
+    }
+
+    // ファイル入力要素を作成
+    createFileInput() {
+      this.fileInput = document.createElement('input');
+      this.fileInput.type = 'file';
+      this.fileInput.accept = 'image/*';
+      this.fileInput.multiple = true;
+      this.fileInput.style.display = 'none';
+      this.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+      document.body.appendChild(this.fileInput);
+    }
+
+    // ファイル選択時の処理
+    handleFileSelect(event) {
+      const files = Array.from(event.target.files);
+      
+      // 複数ファイルの場合（cubemap）
+      if (files.length === 6) {
+        this.loadCubemapFromFiles(files);
+      } else if (files.length === 1) {
+        // 単一ファイルの場合
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          this.setSkyboxTexture(e.target.result);
+          this.mode = 'skybox';
+        };
+        reader.readAsDataURL(files[0]);
+      }
+      this.fileInput.value = '';
+    }
+
+    // ファイルからcubemapを読み込む
+    loadCubemapFromFiles(files) {
+      const readers = files.map(file => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.readAsDataURL(file);
+        });
+      });
+
+      Promise.all(readers).then((dataUrls) => {
+        this.createCubemapFromImages(dataUrls);
+        this.mode = 'cubemap';
+      });
+    }
+
+    // 画像配列からcubemapを作成
+    createCubemapFromImages(imageUrls) {
+      if (!this.scene || imageUrls.length !== 6) return;
+
+      const textureLoader = new THREE.TextureLoader();
+      const textures = [];
+      let loadedCount = 0;
+
+      imageUrls.forEach((url) => {
+        textureLoader.load(url, (texture) => {
+          texture.magFilter = THREE.LinearFilter;
+          texture.minFilter = THREE.LinearFilter;
+          textures.push(texture);
+          loadedCount++;
+
+          // 6枚すべてが読み込まれたらcubemapを作成
+          if (loadedCount === 6) {
+            this.applyCubemap(textures);
+          }
+        });
+      });
+    }
+
+    // cubemapを適用
+    applyCubemap(textures) {
+      if (!this.scene) return;
+
+      // 既存のスカイボックスメッシュを削除
+      if (this.skyboxMesh) {
+        this.scene.remove(this.skyboxMesh);
+      }
+
+      // cubemapジオメトリ
+      const geometry = new THREE.BoxGeometry(200, 200, 200);
+      const materials = textures.map(texture => new THREE.MeshBasicMaterial({ map: texture }));
+
+      this.skyboxMesh = new THREE.Mesh(geometry, materials);
+      this.scene.add(this.skyboxMesh);
     }
 
     // デフォルトの星空テクスチャを生成
     generateDefaultStarfield() {
       const canvas = document.createElement('canvas');
-      canvas.width = 1024;
-      canvas.height = 1024;
+      canvas.width = 2048;
+      canvas.height = 2048;
       const ctx = canvas.getContext('2d');
 
       // 黒い背景
       ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, 1024, 1024);
+      ctx.fillRect(0, 0, 2048, 2048);
 
       // グラデーション背景（宇宙的な）
-      const gradient = ctx.createLinearGradient(0, 0, 0, 1024);
-      gradient.addColorStop(0, '#000033');
-      gradient.addColorStop(0.5, '#000011');
+      const gradient = ctx.createLinearGradient(0, 0, 0, 2048);
+      gradient.addColorStop(0, '#0a0e27');
+      gradient.addColorStop(0.5, '#0d0815');
       gradient.addColorStop(1, '#1a0033');
       ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, 1024, 1024);
+      ctx.fillRect(0, 0, 2048, 2048);
 
-      // ランダムな星を描画
-      for (let i = 0; i < 500; i++) {
-        const x = Math.random() * 1024;
-        const y = Math.random() * 1024;
-        const size = Math.random() * 2;
-        const brightness = Math.random();
+      // 白い星を描画
+      for (let i = 0; i < 800; i++) {
+        const x = Math.random() * 2048;
+        const y = Math.random() * 2048;
+        const size = Math.random() * 2.5;
+        const brightness = Math.random() * 0.8 + 0.2;
 
         ctx.fillStyle = `rgba(255, 255, 255, ${brightness})`;
         ctx.beginPath();
@@ -69,23 +158,113 @@
       }
 
       // カラフルな星を追加
-      const colors = ['#ff6b9d', '#c44569', '#ffa502', '#00d2fc', '#00ff88', '#9d00ff'];
-      for (let i = 0; i < 100; i++) {
-        const x = Math.random() * 1024;
-        const y = Math.random() * 1024;
-        const size = Math.random() * 1.5;
+      const colors = ['#ff6b9d', '#c44569', '#ffa502', '#00d2fc', '#00ff88', '#9d00ff', '#ffff00', '#ff00ff'];
+      for (let i = 0; i < 200; i++) {
+        const x = Math.random() * 2048;
+        const y = Math.random() * 2048;
+        const size = Math.random() * 2;
         const color = colors[Math.floor(Math.random() * colors.length)];
+        const brightness = Math.random() * 0.6 + 0.4;
 
         ctx.fillStyle = color;
+        ctx.globalAlpha = brightness;
         ctx.beginPath();
         ctx.arc(x, y, size, 0, Math.PI * 2);
         ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // ネビュラ効果
+      for (let i = 0; i < 5; i++) {
+        const x = Math.random() * 2048;
+        const y = Math.random() * 2048;
+        const radius = Math.random() * 200 + 100;
+        
+        const nebulaGradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        const nebulaColors = ['rgba(255, 100, 200, 0.1)', 'rgba(100, 150, 255, 0.05)', 'rgba(0, 0, 0, 0)'];
+        nebulaGradient.addColorStop(0, nebulaColors[0]);
+        nebulaGradient.addColorStop(0.5, nebulaColors[1]);
+        nebulaGradient.addColorStop(1, nebulaColors[2]);
+
+        ctx.fillStyle = nebulaGradient;
+        ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
       }
 
       return canvas.toDataURL();
     }
 
-    // 3Dシーンの初期化
+    // 3D星を生成
+    generate3DStars(starCount = 2000) {
+      // 既存の星を削除
+      this.starMeshes.forEach(mesh => this.scene.remove(mesh));
+      this.starMeshes = [];
+
+      // スカイボックスがあれば削除
+      if (this.skyboxMesh) {
+        this.scene.remove(this.skyboxMesh);
+        this.skyboxMesh = null;
+      }
+
+      // シーンの背景を宇宙色に設定
+      this.scene.background = new THREE.Color(0x0a0e27);
+
+      // 3D星を追加
+      for (let i = 0; i < starCount; i++) {
+        // ランダムな位置（球面上）
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.random() * Math.PI;
+        const radius = 80 + Math.random() * 30;
+
+        const x = radius * Math.sin(phi) * Math.cos(theta);
+        const y = radius * Math.sin(phi) * Math.sin(theta);
+        const z = radius * Math.cos(phi);
+
+        // 星のサイズ
+        const size = Math.random() * 0.4 + 0.05;
+
+        // 星の色
+        const colors = [
+          0xFFFFFF, // 白
+          0xFF6B9D, // ピンク
+          0xC44569, // 赤
+          0xFFA502, // オレンジ
+          0x00D2FC, // シアン
+          0x00FF88, // ライムグリーン
+          0x9D00FF, // パープル
+          0xFFFF00, // イエロー
+          0xFF00FF  // マゼンタ
+        ];
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        const brightness = Math.random() * 0.5 + 0.5;
+
+        // スターのジオメトリとマテリアル
+        const geometry = new THREE.SphereGeometry(size, 8, 8);
+        const material = new THREE.MeshBasicMaterial({ color: color });
+        material.color.multiplyScalar(brightness);
+        const star = new THREE.Mesh(geometry, material);
+
+        star.position.set(x, y, z);
+
+        // グロー効果を追加
+        const haloGeometry = new THREE.SphereGeometry(size * 2.5, 8, 8);
+        const haloMaterial = new THREE.MeshBasicMaterial({
+          color: color,
+          transparent: true,
+          opacity: 0.15
+        });
+        const halo = new THREE.Mesh(haloGeometry, haloMaterial);
+        halo.position.copy(star.position);
+
+        this.scene.add(star);
+        this.scene.add(halo);
+        this.starMeshes.push(star);
+        this.starMeshes.push(halo);
+      }
+
+      this.mode = '3dstars';
+    }
+
+    // 3D シーンの初期化
     async initScene() {
       if (this.isInitialized) return;
 
@@ -99,8 +278,9 @@
       this.container.style.left = '0';
       this.container.style.width = '100%';
       this.container.style.height = '100%';
-      this.container.style.zIndex = '10000';
+      this.container.style.zIndex = '9999';
       this.container.style.display = 'none';
+      this.container.style.pointerEvents = 'none';
       document.body.appendChild(this.container);
 
       // シーンを作成
@@ -114,35 +294,47 @@
       this.camera.position.z = 0;
 
       // レンダラーを作成
-      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.renderer.setPixelRatio(window.devicePixelRatio);
       this.renderer.setClearColor(0x000000, 1);
+      this.renderer.shadowMap.enabled = true;
       this.container.appendChild(this.renderer.domElement);
 
-      // スカイボックスジオメトリを作成
-      const geometry = new THREE.SphereGeometry(100, 64, 64);
-      const textureLoader = new THREE.TextureLoader();
+      // デフォルトスカイボックスを初期化
+      this.initDefaultSkybox();
 
-      // デフォルトテクスチャを作成
+      // ウィンドウリサイズ対応
+      window.addEventListener('resize', () => this.onWindowResize());
+
+      // アニメーションループを開始
+      this.animate();
+
+      this.isInitialized = true;
+    }
+
+    // デフォルトスカイボックスの初期化
+    initDefaultSkybox() {
+      const geometry = new THREE.SphereGeometry(100, 64, 64);
       const canvas = document.createElement('canvas');
-      canvas.width = 1024;
-      canvas.height = 1024;
+      canvas.width = 2048;
+      canvas.height = 2048;
       const ctx = canvas.getContext('2d');
 
       // グラデーション背景
-      const gradient = ctx.createLinearGradient(0, 0, 0, 1024);
-      gradient.addColorStop(0, '#000033');
-      gradient.addColorStop(0.5, '#000011');
+      const gradient = ctx.createLinearGradient(0, 0, 0, 2048);
+      gradient.addColorStop(0, '#0a0e27');
+      gradient.addColorStop(0.5, '#0d0815');
       gradient.addColorStop(1, '#1a0033');
       ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, 1024, 1024);
+      ctx.fillRect(0, 0, 2048, 2048);
 
       // 星を描画
-      for (let i = 0; i < 500; i++) {
-        const x = Math.random() * 1024;
-        const y = Math.random() * 1024;
-        const size = Math.random() * 2;
-        ctx.fillStyle = `rgba(255, 255, 255, ${Math.random()})`;
+      for (let i = 0; i < 800; i++) {
+        const x = Math.random() * 2048;
+        const y = Math.random() * 2048;
+        const size = Math.random() * 2.5;
+        ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.8 + 0.2})`;
         ctx.beginPath();
         ctx.arc(x, y, size, 0, Math.PI * 2);
         ctx.fill();
@@ -159,14 +351,6 @@
 
       this.skyboxMesh = new THREE.Mesh(geometry, material);
       this.scene.add(this.skyboxMesh);
-
-      // ウィンドウリサイズ対応
-      window.addEventListener('resize', () => this.onWindowResize());
-
-      // アニメーションループを開始
-      this.animate();
-
-      this.isInitialized = true;
     }
 
     // アニメーションループ
@@ -182,6 +366,13 @@
         this.skyboxMesh.rotation.z = this.rotationZ;
         this.skyboxMesh.scale.set(this.zoom, this.zoom, this.zoom);
       }
+
+      // 3D星を回転
+      this.starMeshes.forEach(mesh => {
+        mesh.rotation.x = this.rotationX;
+        mesh.rotation.y = this.rotationY;
+        mesh.rotation.z = this.rotationZ;
+      });
 
       this.renderer.render(this.scene, this.camera);
     }
@@ -215,14 +406,74 @@
       this.rotationZ = (z * Math.PI) / 180;
     }
 
+    // 回転を加算
+    rotateBy(x, y, z) {
+      this.rotationX += (x * Math.PI) / 180;
+      this.rotationY += (y * Math.PI) / 180;
+      this.rotationZ += (z * Math.PI) / 180;
+    }
+
     // ズームを設定
     setZoom(value) {
       this.zoom = Math.max(0.1, value);
     }
 
-    // 外部画像をテクスチャとして設定
-    setCustomTexture(imageUrl) {
-      if (!this.skyboxMesh) return;
+    // スプライトコスチュームからテクスチャを取得
+    getSpriteTexture(spriteId, costumeIndex) {
+      try {
+        const sprite = this.runtime.getTargetById(spriteId);
+        if (!sprite) return null;
+
+        const costume = sprite.getCostumes()[costumeIndex || 0];
+        if (!costume) return null;
+
+        return costume.asset.encodeDataURI();
+      } catch (e) {
+        console.error('Failed to get sprite costume:', e);
+        return null;
+      }
+    }
+
+    // スプライトコスチュームをテクスチャとして設定
+    setSpriteTextureAsTexture(spriteId, costumeIndex) {
+      const textureUrl = this.getSpriteTexture(spriteId, costumeIndex);
+      if (textureUrl) {
+        this.setSkyboxTexture(textureUrl);
+        this.mode = 'skybox';
+      }
+    }
+
+    // スプライトの複数コスチュームをcubemapとして設定
+    setSpriteTextureAsCubemap(spriteId, costumeIndices) {
+      try {
+        const sprite = this.runtime.getTargetById(spriteId);
+        if (!sprite) return;
+
+        const costumes = sprite.getCostumes();
+        const textureUrls = [];
+
+        // 指定されたインデックスのコスチュームを取得
+        for (let i = 0; i < 6 && i < costumeIndices.length; i++) {
+          const costume = costumes[costumeIndices[i]];
+          if (costume) {
+            textureUrls.push(costume.asset.encodeDataURI());
+          }
+        }
+
+        if (textureUrls.length === 6) {
+          this.createCubemapFromImages(textureUrls);
+          this.mode = 'cubemap';
+        }
+      } catch (e) {
+        console.error('Failed to get sprite costumes:', e);
+      }
+    }
+
+    // スカイボックステクスチャを設定
+    setSkyboxTexture(imageUrl) {
+      if (!this.skyboxMesh) {
+        this.initDefaultSkybox();
+      }
 
       const textureLoader = new THREE.TextureLoader();
       textureLoader.load(imageUrl, (texture) => {
@@ -237,13 +488,24 @@
     rotateTexture(angle) {
       if (!this.skyboxMesh || !this.skyboxMesh.material.map) return;
       this.skyboxMesh.material.map.rotation = (angle * Math.PI) / 180;
+      this.skyboxMesh.material.map.center.set(0.5, 0.5);
     }
 
     // 明度を設定
     setBrightness(value) {
-      if (!this.skyboxMesh) return;
-      value = Math.max(0, Math.min(value, 200)) / 100;
-      this.skyboxMesh.material.color.multiplyScalar(value);
+      this.brightness = Math.max(0, Math.min(value, 200)) / 100;
+    }
+
+    // ファイルから画像を読み込む
+    openFileDialog() {
+      this.fileInput.multiple = false;
+      this.fileInput.click();
+    }
+
+    // ファイルからcubemapを読み込む
+    openCubemapDialog() {
+      this.fileInput.multiple = true;
+      this.fileInput.click();
     }
   }
 
@@ -257,7 +519,7 @@
     getInfo() {
       return {
         id: 'turbowarpSkybox',
-        name: '3D Skybox',
+        name: '3D Skybox (cubemap対応)',
         blocks: [
           {
             opcode: 'showSkybox',
@@ -268,6 +530,16 @@
             opcode: 'hideSkybox',
             blockType: Scratch.BlockType.COMMAND,
             text: 'スカイボックスを非表示'
+          },
+          {
+            opcode: 'show3DStars',
+            blockType: Scratch.BlockType.COMMAND,
+            text: '３D星空を表示'
+          },
+          {
+            opcode: 'showDefaultSkybox',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'デフォルト星空を表示'
           },
           {
             opcode: 'setRotation',
@@ -289,6 +561,39 @@
             }
           },
           {
+            opcode: 'rotateXBy',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'X軸を [X] 度回転',
+            arguments: {
+              X: {
+                type: Scratch.ArgumentType.NUMBER,
+                defaultValue: 10
+              }
+            }
+          },
+          {
+            opcode: 'rotateYBy',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'Y軸を [Y] 度回転',
+            arguments: {
+              Y: {
+                type: Scratch.ArgumentType.NUMBER,
+                defaultValue: 10
+              }
+            }
+          },
+          {
+            opcode: 'rotateZBy',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'Z軸を [Z] 度回転',
+            arguments: {
+              Z: {
+                type: Scratch.ArgumentType.NUMBER,
+                defaultValue: 10
+              }
+            }
+          },
+          {
             opcode: 'setZoom',
             blockType: Scratch.BlockType.COMMAND,
             text: 'スカイボックスをズーム [ZOOM]',
@@ -300,28 +605,6 @@
             }
           },
           {
-            opcode: 'setCustomTexture',
-            blockType: Scratch.BlockType.COMMAND,
-            text: '画像 [IMAGE_URL] をテクスチャとして設定',
-            arguments: {
-              IMAGE_URL: {
-                type: Scratch.ArgumentType.STRING,
-                defaultValue: 'https://example.com/skybox.png'
-              }
-            }
-          },
-          {
-            opcode: 'rotateTexture',
-            blockType: Scratch.BlockType.COMMAND,
-            text: 'テクスチャを [ANGLE] 度回転',
-            arguments: {
-              ANGLE: {
-                type: Scratch.ArgumentType.NUMBER,
-                defaultValue: 0
-              }
-            }
-          },
-          {
             opcode: 'setBrightness',
             blockType: Scratch.BlockType.COMMAND,
             text: '明度を [BRIGHTNESS] に設定',
@@ -329,6 +612,57 @@
               BRIGHTNESS: {
                 type: Scratch.ArgumentType.NUMBER,
                 defaultValue: 100
+              }
+            }
+          },
+          {
+            opcode: 'setSpriteAsTexture',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'スプライト [SPRITE] のコスチューム [COSTUME_INDEX] をテクスチャに設定',
+            arguments: {
+              SPRITE: {
+                type: Scratch.ArgumentType.STRING,
+                defaultValue: 'Sprite1'
+              },
+              COSTUME_INDEX: {
+                type: Scratch.ArgumentType.NUMBER,
+                defaultValue: 0
+              }
+            }
+          },
+          {
+            opcode: 'setSpriteAsCubemap',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'スプライト [SPRITE] のコスチューム [COSTUMES] をcubemapに設定 (カンマ区切り: 0,1,2,3,4,5)',
+            arguments: {
+              SPRITE: {
+                type: Scratch.ArgumentType.STRING,
+                defaultValue: 'Sprite1'
+              },
+              COSTUMES: {
+                type: Scratch.ArgumentType.STRING,
+                defaultValue: '0,1,2,3,4,5'
+              }
+            }
+          },
+          {
+            opcode: 'loadImageFromFile',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'ファイルから画像を読み込む'
+          },
+          {
+            opcode: 'loadCubemapFromFiles',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'ファイルから cubemap を読み込む (6ファイル選択)'
+          },
+          {
+            opcode: 'loadImageFromURL',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'URL [URL] から画像を読み込む',
+            arguments: {
+              URL: {
+                type: Scratch.ArgumentType.STRING,
+                defaultValue: 'https://example.com/skybox.png'
               }
             }
           }
@@ -344,6 +678,17 @@
       this.skybox.hideSkybox();
     }
 
+    show3DStars() {
+      this.skybox.showSkybox();
+      this.skybox.generate3DStars();
+    }
+
+    showDefaultSkybox() {
+      this.skybox.showSkybox();
+      this.skybox.initDefaultSkybox();
+      this.skybox.mode = 'skybox';
+    }
+
     setRotation(args) {
       const x = parseFloat(args.X) || 0;
       const y = parseFloat(args.Y) || 0;
@@ -351,23 +696,58 @@
       this.skybox.setRotation(x, y, z);
     }
 
+    rotateXBy(args) {
+      const x = parseFloat(args.X) || 0;
+      this.skybox.rotateBy(x, 0, 0);
+    }
+
+    rotateYBy(args) {
+      const y = parseFloat(args.Y) || 0;
+      this.skybox.rotateBy(0, y, 0);
+    }
+
+    rotateZBy(args) {
+      const z = parseFloat(args.Z) || 0;
+      this.skybox.rotateBy(0, 0, z);
+    }
+
     setZoom(args) {
       const zoom = parseFloat(args.ZOOM) || 1;
       this.skybox.setZoom(zoom);
     }
 
-    setCustomTexture(args) {
-      this.skybox.setCustomTexture(args.IMAGE_URL);
-    }
-
-    rotateTexture(args) {
-      const angle = parseFloat(args.ANGLE) || 0;
-      this.skybox.rotateTexture(angle);
-    }
-
     setBrightness(args) {
       const brightness = parseFloat(args.BRIGHTNESS) || 100;
       this.skybox.setBrightness(brightness);
+    }
+
+    setSpriteAsTexture(args) {
+      const spriteId = this.runtime.targets.find(t => t.name === args.SPRITE)?.id;
+      const costumeIndex = parseInt(args.COSTUME_INDEX) || 0;
+      if (spriteId) {
+        this.skybox.setSpriteTextureAsTexture(spriteId, costumeIndex);
+      }
+    }
+
+    setSpriteAsCubemap(args) {
+      const spriteId = this.runtime.targets.find(t => t.name === args.SPRITE)?.id;
+      const costumeIndices = args.COSTUMES.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      if (spriteId && costumeIndices.length === 6) {
+        this.skybox.setSpriteTextureAsCubemap(spriteId, costumeIndices);
+      }
+    }
+
+    loadImageFromFile() {
+      this.skybox.openFileDialog();
+    }
+
+    loadCubemapFromFiles() {
+      this.skybox.openCubemapDialog();
+    }
+
+    loadImageFromURL(args) {
+      this.skybox.setSkyboxTexture(args.URL);
+      this.skybox.mode = 'skybox';
     }
   }
 
