@@ -278,9 +278,9 @@
       this.container.style.left = '0';
       this.container.style.width = '100%';
       this.container.style.height = '100%';
-      this.container.style.zIndex = '9999';
+      this.container.style.zIndex = '1'; // 背面に設定
       this.container.style.display = 'none';
-      this.container.style.pointerEvents = 'none';
+      this.container.style.pointerEvents = 'none'; // マウスイベントを透過
       document.body.appendChild(this.container);
 
       // シーンを作成
@@ -294,10 +294,10 @@
       this.camera.position.z = 0;
 
       // レンダラーを作成
-      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, logarithmicDepthBuffer: true });
       this.renderer.setSize(window.innerWidth, window.innerHeight);
       this.renderer.setPixelRatio(window.devicePixelRatio);
-      this.renderer.setClearColor(0x000000, 1);
+      this.renderer.setClearColor(0x000000, 0); // 透明背景
       this.renderer.shadowMap.enabled = true;
       this.container.appendChild(this.renderer.domElement);
 
@@ -385,7 +385,7 @@
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
-    // スカイボックスを表示
+    // スカ��ボックスを表示
     showSkybox() {
       if (this.container) {
         this.container.style.display = 'block';
@@ -419,13 +419,28 @@
     }
 
     // スプライトコスチュームからテクスチャを取得
-    getSpriteTexture(spriteId, costumeIndex) {
+    getSpriteTextureAsDataURL(spriteName, costumeIndex) {
       try {
-        const sprite = this.runtime.getTargetById(spriteId);
-        if (!sprite) return null;
+        // スプライト名からスプライトを取得
+        const sprite = this.runtime.targets.find(t => t.name === spriteName);
+        if (!sprite) {
+          console.error('Sprite not found:', spriteName);
+          return null;
+        }
 
-        const costume = sprite.getCostumes()[costumeIndex || 0];
-        if (!costume) return null;
+        const costumes = sprite.getCostumes();
+        if (!costumes || costumes.length === 0) {
+          console.error('No costumes found');
+          return null;
+        }
+
+        const costumeIdx = Math.max(0, Math.min(costumeIndex, costumes.length - 1));
+        const costume = costumes[costumeIdx];
+
+        if (!costume || !costume.asset) {
+          console.error('Costume not found at index:', costumeIdx);
+          return null;
+        }
 
         return costume.asset.encodeDataURI();
       } catch (e) {
@@ -434,38 +449,12 @@
       }
     }
 
-    // スプライトコスチュームをテクスチャとして設定
-    setSpriteTextureAsTexture(spriteId, costumeIndex) {
-      const textureUrl = this.getSpriteTexture(spriteId, costumeIndex);
+    // スプライトコスチュームをSkyテクスチャとして設定
+    setSkyTextureFromSprite(spriteName, costumeIndex) {
+      const textureUrl = this.getSpriteTextureAsDataURL(spriteName, costumeIndex);
       if (textureUrl) {
         this.setSkyboxTexture(textureUrl);
         this.mode = 'skybox';
-      }
-    }
-
-    // スプライトの複数コスチュームをcubemapとして設定
-    setSpriteTextureAsCubemap(spriteId, costumeIndices) {
-      try {
-        const sprite = this.runtime.getTargetById(spriteId);
-        if (!sprite) return;
-
-        const costumes = sprite.getCostumes();
-        const textureUrls = [];
-
-        // 指定されたインデックスのコスチュームを取得
-        for (let i = 0; i < 6 && i < costumeIndices.length; i++) {
-          const costume = costumes[costumeIndices[i]];
-          if (costume) {
-            textureUrls.push(costume.asset.encodeDataURI());
-          }
-        }
-
-        if (textureUrls.length === 6) {
-          this.createCubemapFromImages(textureUrls);
-          this.mode = 'cubemap';
-        }
-      } catch (e) {
-        console.error('Failed to get sprite costumes:', e);
       }
     }
 
@@ -481,6 +470,8 @@
         texture.minFilter = THREE.LinearFilter;
         this.skyboxMesh.material.map = texture;
         this.skyboxMesh.material.needsUpdate = true;
+      }, undefined, (error) => {
+        console.error('Texture loading error:', error);
       });
     }
 
@@ -519,7 +510,7 @@
     getInfo() {
       return {
         id: 'turbowarpSkybox',
-        name: '3D Skybox (cubemap対応)',
+        name: '3D Skybox',
         blocks: [
           {
             opcode: 'showSkybox',
@@ -540,6 +531,17 @@
             opcode: 'showDefaultSkybox',
             blockType: Scratch.BlockType.COMMAND,
             text: 'デフォルト星空を表示'
+          },
+          {
+            opcode: 'setSkyTextureFromSprite',
+            blockType: Scratch.BlockType.COMMAND,
+            text: 'このスプライトの [COSTUME_INDEX] 番目をskyテクスチャに設定',
+            arguments: {
+              COSTUME_INDEX: {
+                type: Scratch.ArgumentType.NUMBER,
+                defaultValue: 0
+              }
+            }
           },
           {
             opcode: 'setRotation',
@@ -616,36 +618,6 @@
             }
           },
           {
-            opcode: 'setSpriteAsTexture',
-            blockType: Scratch.BlockType.COMMAND,
-            text: 'スプライト [SPRITE] のコスチューム [COSTUME_INDEX] をテクスチャに設定',
-            arguments: {
-              SPRITE: {
-                type: Scratch.ArgumentType.STRING,
-                defaultValue: 'Sprite1'
-              },
-              COSTUME_INDEX: {
-                type: Scratch.ArgumentType.NUMBER,
-                defaultValue: 0
-              }
-            }
-          },
-          {
-            opcode: 'setSpriteAsCubemap',
-            blockType: Scratch.BlockType.COMMAND,
-            text: 'スプライト [SPRITE] のコスチューム [COSTUMES] をcubemapに設定 (カンマ区切り: 0,1,2,3,4,5)',
-            arguments: {
-              SPRITE: {
-                type: Scratch.ArgumentType.STRING,
-                defaultValue: 'Sprite1'
-              },
-              COSTUMES: {
-                type: Scratch.ArgumentType.STRING,
-                defaultValue: '0,1,2,3,4,5'
-              }
-            }
-          },
-          {
             opcode: 'loadImageFromFile',
             blockType: Scratch.BlockType.COMMAND,
             text: 'ファイルから画像を読み込む'
@@ -689,6 +661,12 @@
       this.skybox.mode = 'skybox';
     }
 
+    setSkyTextureFromSprite(args, util) {
+      const costumeIndex = parseInt(args.COSTUME_INDEX) || 0;
+      const spriteName = util.target.name;
+      this.skybox.setSkyTextureFromSprite(spriteName, costumeIndex);
+    }
+
     setRotation(args) {
       const x = parseFloat(args.X) || 0;
       const y = parseFloat(args.Y) || 0;
@@ -719,22 +697,6 @@
     setBrightness(args) {
       const brightness = parseFloat(args.BRIGHTNESS) || 100;
       this.skybox.setBrightness(brightness);
-    }
-
-    setSpriteAsTexture(args) {
-      const spriteId = this.runtime.targets.find(t => t.name === args.SPRITE)?.id;
-      const costumeIndex = parseInt(args.COSTUME_INDEX) || 0;
-      if (spriteId) {
-        this.skybox.setSpriteTextureAsTexture(spriteId, costumeIndex);
-      }
-    }
-
-    setSpriteAsCubemap(args) {
-      const spriteId = this.runtime.targets.find(t => t.name === args.SPRITE)?.id;
-      const costumeIndices = args.COSTUMES.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-      if (spriteId && costumeIndices.length === 6) {
-        this.skybox.setSpriteTextureAsCubemap(spriteId, costumeIndices);
-      }
     }
 
     loadImageFromFile() {
